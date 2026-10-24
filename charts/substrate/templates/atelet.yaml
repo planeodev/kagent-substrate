@@ -18,8 +18,15 @@ limitations under the License.
 {{- fail "set only one of atelet.imageCredentialProviderConfig and atelet.imageCredentialProviderConfigYAML" }}
 {{- end }}
 {{- $credentialProviderConfig := or .Values.atelet.imageCredentialProviderConfig .Values.atelet.imageCredentialProviderConfigYAML }}
-{{- if ne (empty $credentialProviderConfig) (empty .Values.atelet.imageCredentialProviderBinDir) }}
-{{- fail "atelet.imageCredentialProviderConfig (or atelet.imageCredentialProviderConfigYAML) and atelet.imageCredentialProviderBinDir must be set together" }}
+{{- $credentialProviderPlugins := .Values.atelet.imageCredentialProviderPlugins }}
+{{- if and $credentialProviderPlugins .Values.atelet.imageCredentialProviderBinDir }}
+{{- fail "set only one of atelet.imageCredentialProviderPlugins (plugins from images, emptyDir) and atelet.imageCredentialProviderBinDir (a node directory)" }}
+{{- end }}
+{{- if ne (empty $credentialProviderConfig) (and (empty .Values.atelet.imageCredentialProviderBinDir) (empty $credentialProviderPlugins)) }}
+{{- fail "atelet.imageCredentialProviderConfig (or atelet.imageCredentialProviderConfigYAML) needs atelet.imageCredentialProviderBinDir or atelet.imageCredentialProviderPlugins, and they need it" }}
+{{- end }}
+{{- if and .Values.atelet.imageCredentialProviderSecrets (not $credentialProviderConfig) }}
+{{- fail "atelet.imageCredentialProviderSecrets needs a credential provider config (atelet.imageCredentialProviderConfigYAML)" }}
 {{- end }}
 
 # atelet
@@ -139,6 +146,25 @@ spec:
         effect: NoSchedule
       {{- with include "substrate.imagePullSecrets" . }}{{- . | nindent 6 }}{{- end }}
       initContainers:
+{{- range $credentialProviderPlugins }}
+      # Installs a credential-provider plugin binary from its image into the shared emptyDir.
+      - name: {{ printf "credential-provider-%s" .name | trunc 63 | trimSuffix "-" }}
+        image: {{ .image | quote }}
+        {{- with .command }}
+        command: {{ toJson . }}
+        {{- end }}
+        args: {{ toJson (default (list "install" "/run/image-credential-provider/bin") .args) }}
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: image-credential-provider-bin
+          mountPath: /run/image-credential-provider/bin
+{{- end }}
       - name: objectstore-plugin
         image: {{ include "substrate.componentImage" (list "objectstore-plugin" .) }}
         restartPolicy: Always
@@ -277,6 +303,11 @@ spec:
           subPath: config.yaml
 {{- end }}
           readOnly: true
+{{- range .Values.atelet.imageCredentialProviderSecrets }}
+        - name: {{ printf "image-credential-%s" .name | trunc 63 | trimSuffix "-" }}
+          mountPath: {{ printf "/run/image-credential-provider/secrets/%s" .name }}
+          readOnly: true
+{{- end }}
 {{- end }}
       volumes:
       - name: objectstore-plugin
@@ -303,9 +334,22 @@ spec:
           type: Directory
 {{- if $credentialProviderConfig }}
       - name: image-credential-provider-bin
+{{- if $credentialProviderPlugins }}
+        emptyDir: {}
+{{- else }}
         hostPath:
           path: {{ .Values.atelet.imageCredentialProviderBinDir | quote }}
           type: Directory
+{{- end }}
+{{- range .Values.atelet.imageCredentialProviderSecrets }}
+      - name: {{ printf "image-credential-%s" .name | trunc 63 | trimSuffix "-" }}
+        secret:
+          secretName: {{ default .name .secretName | quote }}
+          optional: {{ default false .optional }}
+          {{- with .items }}
+          items: {{ toJson . }}
+          {{- end }}
+{{- end }}
       - name: image-credential-provider-config
 {{- if .Values.atelet.imageCredentialProviderConfigYAML }}
         configMap:

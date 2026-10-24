@@ -83,6 +83,22 @@ atelet:
   # either one still needs the bin directory.
   imageCredentialProviderConfigYAML: ""
   imageCredentialProviderBinDir: ""
+  # Credential-provider plugins delivered from IMAGES instead of a node directory (set this OR
+  # imageCredentialProviderBinDir): each entry becomes an init container that installs its binary into an
+  # emptyDir atelet loads plugins from — no host path, any cluster. The image's entrypoint is run with
+  # args (default ["install", "/run/image-credential-provider/bin"]); the binary's name must match the
+  # provider `name` in the CredentialProviderConfig.
+  #   - name: dockerconfig-credential-provider
+  #     image: ghcr.io/<org>/<repo>/dockerconfig-credential-provider@sha256:<digest>
+  imageCredentialProviderPlugins: []
+  # Secrets mounted read-only at /run/image-credential-provider/secrets/<name> for the plugins (e.g. a
+  # kubernetes.io/dockerconfigjson Secret a docker-config plugin answers from; point the provider's `env`
+  # DOCKER_CONFIG at the directory and map `.dockerconfigjson` to `config.json` with items).
+  #   - name: registry
+  #     secretName: atelet-registry-auth
+  #     optional: true
+  #     items: [{key: .dockerconfigjson, path: config.json}]
+  imageCredentialProviderSecrets: []
   storageBackend: s3
   extraArgs: []
   extraEnv: []
